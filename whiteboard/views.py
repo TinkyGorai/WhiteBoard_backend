@@ -1,5 +1,5 @@
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404, render
 from django.contrib.auth.models import User
@@ -11,6 +11,11 @@ from .serializers import (
 )
 from django.http import JsonResponse
 from .consumers import room_history
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+import uuid
+import random
+import string
 
 def home(request):
     """Simple home page for testing"""
@@ -385,3 +390,11 @@ def check_room_exists(request, room_id):
     """
     exists = room_id in room_history
     return JsonResponse({'exists': exists})
+
+@api_view(['GET'])
+def test_view(request):
+    """Simple test view to check if the app is working"""
+    return Response({
+        'message': 'Django app is working!',
+        'status': 'success'
+    })

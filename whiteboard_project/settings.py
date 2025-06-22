@@ -12,8 +12,13 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 from pathlib import Path
 import os
-import dj_database_url
 from django.core.management.utils import get_random_secret_key
+
+# Try to import dj_database_url, but don't fail if it's not available
+try:
+    import dj_database_url
+except ImportError:
+    dj_database_url = None
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,7 +33,17 @@ SECRET_KEY = os.environ.get('SECRET_KEY', get_random_secret_key())
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+# ALLOWED_HOSTS configuration
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+
+# Add hosts from environment variable
+if os.environ.get('ALLOWED_HOSTS'):
+    ALLOWED_HOSTS.extend(os.environ.get('ALLOWED_HOSTS').split(','))
+
+# Add Render external URL if available
+RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL')
+if RENDER_EXTERNAL_URL:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_URL)
 
 
 # Application definition
@@ -108,7 +123,8 @@ DATABASES = {
     }
 }
 
-if 'DATABASE_URL' in os.environ:
+# Use PostgreSQL if DATABASE_URL is available and dj_database_url is installed
+if 'DATABASE_URL' in os.environ and dj_database_url:
     DATABASES['default'] = dj_database_url.config(
         conn_max_age=600,
         ssl_require=True
@@ -172,12 +188,6 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
-# For production, allow all origins (you can restrict this later)
-if not DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-
-CORS_ALLOW_CREDENTIALS = True
-
 # CSRF settings
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
@@ -186,10 +196,17 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
-RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL')
+# Add Render external URL to CSRF trusted origins if available
 if RENDER_EXTERNAL_URL:
-    ALLOWED_HOSTS.append(RENDER_EXTERNAL_URL)
     CSRF_TRUSTED_ORIGINS.append(f"https://{RENDER_EXTERNAL_URL}")
+
+# For production, allow all origins (you can restrict this later)
+if not DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+    # Add wildcard for production
+    CSRF_TRUSTED_ORIGINS.append("https://*.onrender.com")
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Exempt certain URLs from CSRF protection for anonymous users
 CSRF_EXEMPT_URLS = [
