@@ -401,3 +401,6 @@ def test_view(request):
 
 def root_message(request):
     return HttpResponse("This is the API server. No frontend here.", status=200)
+
+def favicon(request):
+    return HttpResponse(status=204)
