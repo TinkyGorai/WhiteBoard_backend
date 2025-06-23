@@ -9,7 +9,7 @@ from .serializers import (
     RoomSerializer, RoomCreateSerializer, DrawingSerializer, 
     ChatMessageSerializer, RoomParticipantSerializer
 )
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from .consumers import room_history
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -398,3 +398,6 @@ def test_view(request):
         'message': 'Django app is working!',
         'status': 'success'
     })
+
+def root_message(request):
+    return HttpResponse("This is the API server. No frontend here.", status=200)

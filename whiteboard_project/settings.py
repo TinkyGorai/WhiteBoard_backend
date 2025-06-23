@@ -186,6 +186,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://white-board-frontend.vercel.app",  # Production frontend
 ]
 
 # CSRF settings
@@ -194,15 +195,16 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://white-board-frontend.vercel.app",  # Production frontend
 ]
 
 # Add Render external URL to CSRF trusted origins if available
 if RENDER_EXTERNAL_URL:
     CSRF_TRUSTED_ORIGINS.append(f"https://{RENDER_EXTERNAL_URL}")
 
-# For production, allow all origins (you can restrict this later)
+# For production, allow only specified origins
 if not DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_ALL_ORIGINS = False
     # Add wildcard for production
     CSRF_TRUSTED_ORIGINS.append("https://*.onrender.com")
 
