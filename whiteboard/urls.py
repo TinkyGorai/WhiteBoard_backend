@@ -13,7 +13,6 @@ urlpatterns = [
     path('', root_message),
     path('favicon.ico', favicon),
     path('api/room/exists/<str:room_id>/', views.check_room_exists, name='check_room_exists'),
-    path('', views.home, name='home'),
     path('api/', include(router.urls)),
     path('api/rooms/', views.RoomViewSet.as_view({'get': 'list', 'post': 'create'}), name='room-list'),
     path('api/rooms/<str:room_code>/', views.RoomViewSet.as_view({'get': 'retrieve'}), name='room-detail'),
