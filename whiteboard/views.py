@@ -1,5 +1,5 @@
 from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, method_decorator
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404, render
 from django.contrib.auth.models import User
@@ -21,6 +21,7 @@ def home(request):
     """Simple home page for testing"""
     return render(request, 'whiteboard/home.html')
 
+@method_decorator(csrf_exempt, name='create')
 class RoomViewSet(viewsets.ModelViewSet):
     queryset = Room.objects.all()
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
@@ -396,6 +397,15 @@ def test_view(request):
     """Simple test view to check if the app is working"""
     return Response({
         'message': 'Django app is working!',
+        'status': 'success'
+    })
+
+@api_view(['GET'])
+def api_test(request):
+    """Test endpoint for API connectivity"""
+    return Response({
+        'message': 'API is working!',
+        'timestamp': '2025-06-24',
         'status': 'success'
     })
 

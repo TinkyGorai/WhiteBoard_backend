@@ -17,5 +17,6 @@ urlpatterns = [
     path('api/rooms/', views.RoomViewSet.as_view({'get': 'list', 'post': 'create'}), name='room-list'),
     path('api/rooms/<str:room_code>/', views.RoomViewSet.as_view({'get': 'retrieve'}), name='room-detail'),
     path('api/test/', views.test_view, name='test'),
+    path('api/api-test/', views.api_test, name='api-test'),
     path('api/check-room/<str:room_id>/', views.check_room_exists, name='check-room'),
 ] 
