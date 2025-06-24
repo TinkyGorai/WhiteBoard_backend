@@ -399,8 +399,10 @@ def test_view(request):
         'status': 'success'
     })
 
+@csrf_exempt
 def root_message(request):
     return HttpResponse("This is the API server. No frontend here.", status=200)
 
+@csrf_exempt
 def favicon(request):
     return HttpResponse(status=204)
