@@ -2,10 +2,11 @@ import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 import uuid
 from channels.db import database_sync_to_async
+from collections import defaultdict
 
 # In-memory store for drawing history per room.
 room_history = {}
-redo_history = {}
+redo_history = defaultdict(lambda: defaultdict(list))  # redo_history[room_id][user_id] = stack
 user_cursors = {}  # Store user cursor positions
 user_laser_pointers = {}  # Store laser pointer positions
 user_permissions = {}  # Store user permissions per room
@@ -14,7 +15,11 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_id = self.scope['url_route']['kwargs']['room_id']
         self.room_group_name = f'whiteboard_{self.room_id}'
-        self.user_id = str(uuid.uuid4())  # Generate unique user ID
+        query_string = self.scope.get('query_string', b'').decode('utf-8')
+        import urllib.parse
+        query_params = urllib.parse.parse_qs(query_string)
+        provided_user_id = query_params.get('user_id', [None])[0]
+        self.user_id = provided_user_id or str(uuid.uuid4())
         self.username = self.scope.get('user', {}).get('username', 'Anonymous')
         
         print(f"🔌 WebSocket connecting to room: {self.room_id}")
@@ -31,7 +36,6 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
         # Initialize history for the room if it doesn't exist
         if self.room_id not in room_history:
             room_history[self.room_id] = []
-            redo_history[self.room_id] = []
             user_cursors[self.room_id] = {}
             user_laser_pointers[self.room_id] = {}
             user_permissions[self.room_id] = {}
@@ -63,7 +67,7 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
             'type': 'board_state',
             'history': room_history.get(self.room_id, []),
             'canUndo': len(room_history.get(self.room_id, [])) > 0,
-            'canRedo': len(redo_history.get(self.room_id, [])) > 0,
+            'canRedo': len(redo_history[self.room_id][self.user_id]) > 0,
             'user_permission': user_permissions.get(self.room_id, {}).get(self.user_id, 'view'),
         }))
         
@@ -224,17 +228,21 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
                 'tool_type': data.get('tool_type', 'pen'),
                 'color': data.get('color', '#000000'),
                 'stroke_width': data.get('stroke_width', 2),
-                'data': data.get('data', {})
+                'data': data.get('data', {}),
+                'user_id': self.user_id
             }
         }
         event_to_store = {
             'type': 'draw',
-            'drawing': event_to_broadcast['drawing_data']
+            'drawing': event_to_broadcast['drawing_data'],
+            'user_id': self.user_id
         }
         
         if self.room_id in room_history:
             room_history[self.room_id].append(event_to_store)
-            redo_history[self.room_id] = [] # Clear redo history on new action
+            redo_history[self.room_id][self.user_id].clear()
+            print(f"[DEBUG] room_history[{self.room_id}] after draw: {room_history[self.room_id]}")
+            print(f"[DEBUG] redo_history[{self.room_id}][{self.user_id}] cleared")
 
         # Broadcast the drawing action
         await self.channel_layer.group_send(self.room_group_name, event_to_broadcast)
@@ -257,17 +265,21 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
                 'color': data.get('color', '#000000'),
                 'stroke_width': data.get('stroke_width', 2),
                 'fill_color': data.get('fill_color', 'transparent'),
-                'data': data.get('data', {})
+                'data': data.get('data', {}),
+                'user_id': self.user_id
             }
         }
         event_to_store = {
             'type': 'shape',
-            'shape': event_to_broadcast['shape_data']
+            'shape': event_to_broadcast['shape_data'],
+            'user_id': self.user_id
         }
         
         if self.room_id in room_history:
             room_history[self.room_id].append(event_to_store)
-            redo_history[self.room_id] = []
+            redo_history[self.room_id][self.user_id].clear()
+            print(f"[DEBUG] room_history[{self.room_id}] after shape: {room_history[self.room_id]}")
+            print(f"[DEBUG] redo_history[{self.room_id}][{self.user_id}] cleared")
 
         await self.channel_layer.group_send(self.room_group_name, event_to_broadcast)
         await self.broadcast_history_status()
@@ -287,17 +299,21 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
                 'text': data.get('text', ''),
                 'color': data.get('color', '#000000'),
                 'font_size': data.get('font_size', 16),
-                'position': data.get('position', {'x': 0, 'y': 0})
+                'position': data.get('position', {'x': 0, 'y': 0}),
+                'user_id': self.user_id
             }
         }
         event_to_store = {
             'type': 'text',
-            'text': event_to_broadcast['text_data']
+            'text': event_to_broadcast['text_data'],
+            'user_id': self.user_id
         }
         
         if self.room_id in room_history:
             room_history[self.room_id].append(event_to_store)
-            redo_history[self.room_id] = []
+            redo_history[self.room_id][self.user_id].clear()
+            print(f"[DEBUG] room_history[{self.room_id}] after text: {room_history[self.room_id]}")
+            print(f"[DEBUG] redo_history[{self.room_id}][{self.user_id}] cleared")
 
         await self.channel_layer.group_send(self.room_group_name, event_to_broadcast)
         await self.broadcast_history_status()
@@ -339,7 +355,7 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
 
     async def handle_clear_canvas(self, data):
         # Check if user has admin permissions
-        if not self.can_admin():
+        if not self.can_edit():
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': 'You do not have permission to clear the canvas'
@@ -348,7 +364,10 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
         
         if self.room_id in room_history:
             room_history[self.room_id] = []
-            redo_history[self.room_id] = []
+            for uid in redo_history[self.room_id]:
+                redo_history[self.room_id][uid].clear()
+            print(f"[DEBUG] room_history[{self.room_id}] cleared")
+            print(f"[DEBUG] redo_history[{self.room_id}] cleared for all users")
 
         await self.channel_layer.group_send(self.room_group_name, {
             'type': 'clear_canvas_message',
@@ -357,8 +376,8 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
         await self.broadcast_history_status()
 
     async def handle_undo(self):
-        # Check if user has admin permissions
-        if not self.can_admin():
+        print(f"[DEBUG] handle_undo: user_id={self.user_id}, permission={user_permissions.get(self.room_id, {}).get(self.user_id)}")
+        if not self.can_edit():
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': 'You do not have permission to undo actions'
@@ -366,43 +385,77 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
             return
         
         if room_history.get(self.room_id):
-            last_action = room_history[self.room_id].pop()
-            redo_history[self.room_id].append(last_action)
-            await self.broadcast_board_state()
+            print(f"[DEBUG] Current history: {room_history[self.room_id]}")
+            print(f"[DEBUG] Looking for user_id: {self.user_id}")
+            # Find the last action by this user
+            for i in range(len(room_history[self.room_id]) - 1, -1, -1):
+                action = room_history[self.room_id][i]
+                action_user_id = action.get('user_id')
+                print(f"[DEBUG] Checking action {i}: user_id={action_user_id}, type={action.get('type')}")
+                if action_user_id == self.user_id:
+                    last_action = room_history[self.room_id].pop(i)
+                    redo_history[self.room_id][self.user_id].append(last_action)
+                    print(f"[DEBUG] Undo: moved to redo_history[{self.room_id}][{self.user_id}]")
+                    print(f"[DEBUG] room_history[{self.room_id}] after undo: {room_history[self.room_id]}")
+                    print(f"[DEBUG] redo_history[{self.room_id}][{self.user_id}]: {redo_history[self.room_id][self.user_id]}")
+                    await self.broadcast_board_state()
+                    return
+            else:
+                # No action found by this user
+                print(f"[DEBUG] No actions found by user {self.user_id}")
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'message': 'No actions to undo'
+                }))
+                return
+        else:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'No actions to undo'
+            }))
+            return
 
     async def handle_redo(self):
-        # Check if user has admin permissions
-        if not self.can_admin():
+        print(f"[DEBUG] handle_redo: user_id={self.user_id}, permission={user_permissions.get(self.room_id, {}).get(self.user_id)}")
+        if not self.can_edit():
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': 'You do not have permission to redo actions'
             }))
             return
         
-        if redo_history.get(self.room_id):
-            action_to_redo = redo_history[self.room_id].pop()
+        if redo_history[self.room_id][self.user_id]:
+            action_to_redo = redo_history[self.room_id][self.user_id].pop()
             room_history[self.room_id].append(action_to_redo)
+            print(f"[DEBUG] Redo: moved back to room_history[{self.room_id}]")
+            print(f"[DEBUG] room_history[{self.room_id}] after redo: {room_history[self.room_id]}")
+            print(f"[DEBUG] redo_history[{self.room_id}][{self.user_id}]: {redo_history[self.room_id][self.user_id]}")
             await self.broadcast_board_state()
 
     async def broadcast_board_state(self):
         history = room_history.get(self.room_id, [])
-        can_undo = len(history) > 0
-        can_redo = len(redo_history.get(self.room_id, [])) > 0
+        # Check if there are any actions by the current user that can be undone
+        can_undo = any(action.get('user_id') == self.user_id for action in history)
+        print(f"[DEBUG] broadcast_board_state: can_undo={can_undo}, history_len={len(history)}")
+        can_redo = len(redo_history[self.room_id][self.user_id]) > 0
         await self.channel_layer.group_send(self.room_group_name, {
             'type': 'board_state_message',
             'history': history,
             'canUndo': can_undo,
             'canRedo': can_redo,
+            'user_permission': user_permissions.get(self.room_id, {}).get(self.user_id, 'view'),
         })
 
     async def broadcast_history_status(self):
         history = room_history.get(self.room_id, [])
-        can_undo = len(history) > 0
-        can_redo = len(redo_history.get(self.room_id, [])) > 0
+        # Check if there are any actions by the current user that can be undone
+        can_undo = any(action.get('user_id') == self.user_id for action in history)
+        can_redo = len(redo_history[self.room_id][self.user_id]) > 0
         await self.channel_layer.group_send(self.room_group_name, {
             'type': 'history_status_message',
             'canUndo': can_undo,
             'canRedo': can_redo,
+            'user_permission': user_permissions.get(self.room_id, {}).get(self.user_id, 'view'),
         })
 
     # WebSocket message handlers
@@ -444,6 +497,7 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
             'history': event['history'],
             'canUndo': event['canUndo'],
             'canRedo': event['canRedo'],
+            'user_permission': event.get('user_permission', 'view'),
         }))
 
     async def history_status_message(self, event):
@@ -451,6 +505,7 @@ class WhiteboardConsumer(AsyncWebsocketConsumer):
             'type': 'history_status',
             'canUndo': event['canUndo'],
             'canRedo': event['canRedo'],
+            'user_permission': event.get('user_permission', 'view'),
         }))
 
     async def clear_canvas_message(self, event):
